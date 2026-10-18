@@ -1,0 +1,5 @@
+build*/
+*.trace
+.DS_Store
+*.o
+*.out
