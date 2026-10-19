@@ -29,10 +29,9 @@ private:
     std::atomic<std::size_t> write_counter_{0};  // how many items have been written in total
 public:
     bool try_push(const T& item) {
-        // check full
         std::size_t curr_write_counter = write_counter_.load();
         std::size_t curr_read_counter = read_counter_.load();
-
+        // check full
         if(curr_write_counter - curr_read_counter == Capacity) return false;
 
         std::size_t curr_write_index = (curr_write_counter & (Capacity-1));
@@ -45,7 +44,7 @@ public:
     bool try_pop(T& item) {
         std::size_t curr_write_counter = write_counter_.load();
         std::size_t curr_read_counter = read_counter_.load();
-
+        // check empty
         if(curr_read_counter == curr_write_counter) return false;
 
         std::size_t curr_read_index = (curr_read_counter & (Capacity-1));
