@@ -5,7 +5,7 @@
 
 #include "spsc/spsc_ring.hpp"
 
-using Queue4 = spsc::SPSCRingBuffer<int, 4>;\
+using Queue4 = spsc::SPSCRingBuffer<int, 4>;
 static_assert(alignof(Queue4) == 128);
 static_assert(sizeof(Queue4) == 384);
 
