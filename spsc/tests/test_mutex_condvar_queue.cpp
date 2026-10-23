@@ -1,3 +1,7 @@
+#ifdef NDEBUG
+#error "These tests rely on assert(); do not compile them with -DNDEBUG"
+#endif
+
 #include <iostream>
 #include <cassert>
 #include <memory>

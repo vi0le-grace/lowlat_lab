@@ -11,6 +11,10 @@
 // Build (keep asserts on, so no -DNDEBUG):
 //   clang++ -std=c++17 -O2 -Wall -Wextra -Iinclude tests/test_queues.cpp -o build/test_queues -pthread
 
+#ifdef NDEBUG
+#error "These tests rely on assert(); do not compile them with -DNDEBUG"
+#endif
+
 #include <cassert>
 #include <cstddef>
 #include <iostream>
