@@ -19,3 +19,13 @@ add_executable(test_queues tests/test_queues.cpp)
 target_link_libraries(test_queues PRIVATE spsc Threads::Threads)
 
 target_compile_options(test_queues PRIVATE -Wall -Wextra -UNDEBUG)
+
+find_package(benchmark REQUIRED)
+
+add_executable(bench_spsc bench/bench_spsc.cpp)
+target_link_libraries(bench_spsc PRIVATE spsc Threads::Threads benchmark::benchmark)
+target_compile_options(bench_spsc PRIVATE -Wall -Wextra)
+
+if(NOT CMAKE_BUILD_TYPE STREQUAL "Release")
+  message(WARNING "Benchmarks should be built with -DCMAKE_BUILD_TYPE=Release")
+endif()
