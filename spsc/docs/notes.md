@@ -2,10 +2,14 @@
 
 ## Status
 - Four try_push/try_pop queues (spin-retry mutex, naive ring, ring, cached ring)
-  plus a blocking mutex + condvar queue (push/pop), all with unit tests, a
-  two-thread stress test and TSan runs (clean).
-- Benchmarks and false-sharing demo done.
-- Next: merge test files, CMake, README, DESIGN.md.
+  plus a blocking mutex + condvar queue (push/pop).
+- Tests: test_queues.cpp (generic tests shared by the four try_ queues, cached-only
+  reload tests, layout static_asserts) and test_mutex_condvar_queue.cpp.
+  TSan and ASan builds pass [confirm ASan before keeping this].
+- Benchmarks and false-sharing demo done. Whiteboard check done.
+- CMake build done: header-only library target, tests, benchmark, ctest,
+  SPSC_SANITIZER option.
+- Next: DESIGN.md, README, GitHub Actions on x86 Linux.
 
 ## Decisions
 - Ladder, one change per rung: mutex + condvar baseline -> naive ring (seq_cst,
@@ -14,9 +18,31 @@
 - Counters count up forever; slot = counter & (Capacity - 1). All Capacity slots
   usable. Full: write - read == Capacity. Empty: read == write.
 - Every queue is bounded to the same capacity, so all behave the same when full.
-- The first spin-retry MutexQueue stays in the repo (with its test) but is not
-  benchmarked, because it starves under a retry loop (see below).
-- Cache line size hardcoded to 128 (Apple Silicon); to be moved into one constant.
+- The first spin-retry MutexQueue stays in the repo and is covered by
+  test_queues.cpp, but is not benchmarked, because it starves under a retry
+  loop (see below).
+- Cache line size is a compile-time constant (spsc::CACHE_LINE_SIZE in
+  constants.hpp): 128 on Apple Silicon, 64 on x86. The padded rings' layout is
+  checked by static_asserts in test_queues.cpp (sizeof == 3 * line size).
+
+## Build and test (from spsc/)
+    cmake -S . -B build-cmake                    # default build type: Release (-O2 -DNDEBUG)
+    cmake --build build-cmake
+    ctest --test-dir build-cmake --output-on-failure
+    ./build-cmake/bench_spsc --benchmark_out=results/<date>_full.json --benchmark_out_format=json
+
+Sanitizers (separate build folder each; never take benchmark numbers from them):
+
+    cmake -S . -B build-tsan -DSPSC_SANITIZER=thread    # or =address
+    cmake --build build-tsan
+    ctest --test-dir build-tsan --output-on-failure
+
+- Tests are compiled with -UNDEBUG so assert() stays active in a Release build;
+  each test file also has an #error guard if NDEBUG is defined.
+- Sanitizer builds shrink the stress size with SPSC_STRESS_N=200000.
+- thread and address sanitizers cannot be combined in one build.
+- Benchmarks need Release (configure warns otherwise). The CMake Release flags
+  match the hand-compiled ones used for all recorded results.
 
 ## Correctness experiments (break it on purpose)
 Each change was made temporarily, then reverted.
@@ -110,12 +136,10 @@ not comparable in absolute terms to the tables above.
   Producer's load misses dropped ~157x with cached counters.
 
 ## To do
-- Merge the four try_ test files into one templated file (condvar queue is tested
-  separately: push/pop interface).
-- Shared cache-line constant instead of hardcoded 128.
-- CMake (library target, tests, benchmark, sanitizer option), then README and
-  DESIGN.md.
-- GitHub Actions on x86 Linux (cross-check).
+- docs/DESIGN.md and README.md (build, test, sanitize, benchmark, results table,
+  limitations).
+- GitHub Actions on x86 Linux (build, ctest, TSan; benchmark only as a sanity check).
+- Tag spsc-v1.0 when the docs are done.
 - Optional: redo Instruments counters on the final queues (10M items each),
   128 B payload test, move operations on all queues, batching, slot remap,
   latency percentiles.
