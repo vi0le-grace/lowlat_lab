@@ -9,6 +9,12 @@
 
 #include "spsc/mutex_condvar_queue.hpp"
 
+#ifdef SPSC_STRESS_N
+constexpr int N = SPSC_STRESS_N;
+#else
+constexpr int N = 1'000'000;
+#endif
+
 void test_basic() {
     spsc::MutexCondvarQueue<int, 4> q;
     for(int i = 1; i <= 4; i++) q.push(i * 10);
@@ -40,7 +46,6 @@ void stress_two_threads(int n) {
 }
 
 int main() {
-    constexpr int N = 1'000'000;
     test_basic();
     stress_two_threads<spsc::MutexCondvarQueue<int, 1>>(N / 10);     // both threads block constantly
     stress_two_threads<spsc::MutexCondvarQueue<int, 2>>(N / 10);

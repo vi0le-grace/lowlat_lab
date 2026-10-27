@@ -12,13 +12,34 @@ set(CMAKE_CXX_FLAGS_RELEASE "-O2 -DNDEBUG")
 
 find_package(Threads REQUIRED)
 
+set(SPSC_SANITIZER "" CACHE STRING "Sanitizer to enable: thread, address, or empty")
+set_property(CACHE SPSC_SANITIZER PROPERTY STRINGS "" thread address)
+
+if(SPSC_SANITIZER AND NOT SPSC_SANITIZER MATCHES "^(thread|address)$")
+  message(FATAL_ERROR "SPSC_SANITIZER must be 'thread' or 'address'")
+endif()
+
+if(SPSC_SANITIZER)
+  add_compile_options(-fsanitize=${SPSC_SANITIZER} -fno-omit-frame-pointer -g -O1)
+  add_link_options(-fsanitize=${SPSC_SANITIZER})
+  add_compile_definitions(SPSC_STRESS_N=200000)
+endif()
+
 add_library(spsc INTERFACE)
 target_include_directories(spsc INTERFACE include)
 
-add_executable(test_queues tests/test_queues.cpp)
-target_link_libraries(test_queues PRIVATE spsc Threads::Threads)
+enable_testing()
 
-target_compile_options(test_queues PRIVATE -Wall -Wextra -UNDEBUG)
+function(add_spsc_test name source)
+  add_executable(${name} ${source})
+  target_link_libraries(${name} PRIVATE spsc Threads::Threads)
+  target_compile_options(${name} PRIVATE -Wall -Wextra -UNDEBUG)
+  add_test(NAME ${name} COMMAND ${name})
+  set_tests_properties(${name} PROPERTIES TIMEOUT 300)
+endfunction()
+
+add_spsc_test(test_queues tests/test_queues.cpp)
+add_spsc_test(test_mutex_condvar_queue tests/test_mutex_condvar_queue.cpp)
 
 find_package(benchmark REQUIRED)
 

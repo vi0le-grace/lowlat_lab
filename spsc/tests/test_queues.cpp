@@ -32,7 +32,11 @@ static_assert(sizeof(spsc::SPSCRingBuffer<int, 4>) == 384);
 static_assert(alignof(spsc::SPSCRingBufferCached<int, 4>) == 128);
 static_assert(sizeof(spsc::SPSCRingBufferCached<int, 4>) == 384);
 
+#ifdef SPSC_STRESS_N
+constexpr int STRESS_N = SPSC_STRESS_N;
+#else
 constexpr int STRESS_N = 5'000'000;
+#endif
 
 // ---- generic single-thread tests (Q has capacity 4 unless noted) ----
 
