@@ -13,9 +13,9 @@
 // read (pop). A release store paired with the other thread's acquire load makes
 // the slot's contents visible in the right order, so seq_cst is not needed.
 //
-// Padding: each counter sits on its own 128-byte cache line (Apple Silicon),
-// so one thread's stores do not invalidate the line the other is using.
-// 128 bytes is for Apple Silicon; x86 uses 64
+// Padding: each counter sits on its own cache line, so one thread's stores do
+// not invalidate the line the other is using. The line size is CACHE_LINE_SIZE
+// (constants.hpp): 128 bytes on Apple Silicon, 64 on x86.
 //
 // Compared to SPSCRingBufferNaive: acquire/release instead of seq_cst, plus
 // padding.
@@ -25,6 +25,8 @@
 #include <atomic>
 #include <cstddef>
 
+#include "spsc/constants.hpp"
+
 namespace spsc {
 
 template<typename T, std::size_t Capacity>
@@ -33,8 +35,8 @@ private:
     static_assert(Capacity > 0, "Capacity must be greater than zero");
     static_assert((Capacity & (Capacity - 1)) == 0, "Capacity must be a power of two");
     T buffer_[Capacity];
-    alignas(128) std::atomic<std::size_t> read_counter_ {0};
-    alignas(128) std::atomic<std::size_t> write_counter_ {0};
+    alignas(CACHE_LINE_SIZE) std::atomic<std::size_t> read_counter_ {0};
+    alignas(CACHE_LINE_SIZE) std::atomic<std::size_t> write_counter_ {0};
 public:
     bool try_push(const T& item) {
         std::size_t curr_write_counter = write_counter_.load(std::memory_order_relaxed);

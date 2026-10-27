@@ -21,9 +21,10 @@
 // A wrong "looks full/empty" costs one reload; it can never cause an overwrite
 // or a read of an unwritten slot.
 //
-// Layout: each thread's counter and its private cached copy share one 128-byte
-// cache line (Apple Silicon), so the two lines are not shared between threads
-// and the cached copies add no cross-core traffic.
+// Layout: each thread's counter and its private cached copy share one cache
+// line of CACHE_LINE_SIZE bytes (constants.hpp: 128 on Apple Silicon, 64 on
+// x86), so the two lines are not shared between threads and the cached copies
+// add no cross-core traffic.
 //
 // Compared to SPSCRingBuffer: same ordering and padding, plus the cached
 // counters, which avoid reading the other thread's cache line on most calls.
@@ -32,6 +33,8 @@
 
 #include <atomic>
 #include <cstddef>
+
+#include "spsc/constants.hpp"
 
 namespace spsc {
 
@@ -42,10 +45,10 @@ private:
     static_assert((Capacity & (Capacity - 1)) == 0, "Capacity must be a power of two");
     T buffer_[Capacity];
     // consumer-owned line
-    alignas(128) std::atomic<std::size_t> read_counter_ {0};
+    alignas(CACHE_LINE_SIZE) std::atomic<std::size_t> read_counter_ {0};
     std::size_t cached_write_counter_ {0};  // consumer's private copy of write_counter_
     // producer-owned line
-    alignas(128) std::atomic<std::size_t> write_counter_ {0};
+    alignas(CACHE_LINE_SIZE) std::atomic<std::size_t> write_counter_ {0};
     std::size_t cached_read_counter_ {0};   // producer's private copy of read_counter_
 public:
     bool try_push(const T& item) {

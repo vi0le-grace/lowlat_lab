@@ -25,12 +25,13 @@
 #include "spsc/spsc_ring_naive.hpp"
 #include "spsc/spsc_ring.hpp"
 #include "spsc/spsc_ring_cached.hpp"
+#include "spsc/constants.hpp"
 
 // ---- layout checks (padded rings only) ----
-static_assert(alignof(spsc::SPSCRingBuffer<int, 4>) == 128);
-static_assert(sizeof(spsc::SPSCRingBuffer<int, 4>) == 384);
-static_assert(alignof(spsc::SPSCRingBufferCached<int, 4>) == 128);
-static_assert(sizeof(spsc::SPSCRingBufferCached<int, 4>) == 384);
+static_assert(alignof(spsc::SPSCRingBuffer<int, 4>) == spsc::CACHE_LINE_SIZE);
+static_assert(sizeof(spsc::SPSCRingBuffer<int, 4>) == 3 * spsc::CACHE_LINE_SIZE);
+static_assert(alignof(spsc::SPSCRingBufferCached<int, 4>) == spsc::CACHE_LINE_SIZE);
+static_assert(sizeof(spsc::SPSCRingBufferCached<int, 4>) == 3 * spsc::CACHE_LINE_SIZE);
 
 #ifdef SPSC_STRESS_N
 constexpr int STRESS_N = SPSC_STRESS_N;
