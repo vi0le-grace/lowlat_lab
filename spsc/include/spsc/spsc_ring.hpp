@@ -19,11 +19,16 @@
 //
 // Compared to SPSCRingBufferNaive: acquire/release instead of seq_cst, plus
 // padding.
+//
+// T must be default-constructible and copy- or move-assignable (slots are an
+// array of live objects). A try_push that returns false does not consume its
+// argument, so it can be retried.
 
 #pragma once
 
 #include <atomic>
 #include <cstddef>
+#include <utility>
 
 #include "spsc/constants.hpp"
 
@@ -50,6 +55,18 @@ public:
         write_counter_.store(curr_write_counter + 1, std::memory_order_release);
         return true;
     }
+    bool try_push(T&& item) {
+        std::size_t curr_write_counter = write_counter_.load(std::memory_order_relaxed);
+        std::size_t curr_read_counter = read_counter_.load(std::memory_order_acquire);
+
+        if(curr_write_counter - curr_read_counter == Capacity) return false;
+
+        std::size_t curr_write_index = (curr_write_counter & (Capacity - 1));
+        buffer_[curr_write_index] = std::move(item);
+
+        write_counter_.store(curr_write_counter + 1, std::memory_order_release);
+        return true;
+    }
     bool try_pop(T& item) {
         std::size_t curr_write_counter = write_counter_.load(std::memory_order_acquire);
         std::size_t curr_read_counter = read_counter_.load(std::memory_order_relaxed);
@@ -57,7 +74,7 @@ public:
         if(curr_read_counter == curr_write_counter) return false;
 
         std::size_t curr_read_index = (curr_read_counter & (Capacity - 1));
-        item = buffer_[curr_read_index];
+        item = std::move(buffer_[curr_read_index]);
 
         read_counter_.store(curr_read_counter + 1, std::memory_order_release);
         return true;

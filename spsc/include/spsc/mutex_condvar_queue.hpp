@@ -7,6 +7,9 @@
 // while it is empty. (Any thread may call either function.)
 // No shutdown mechanism: a thread blocked in push/pop stays blocked until the
 // other side acts.
+//
+// T must be default-constructible and copy- or move-assignable (slots are an
+// array of live objects).
 
 #pragma once
 
@@ -14,6 +17,7 @@
 #include <cstddef>
 #include <mutex>
 #include <queue>
+#include <utility>
 
 namespace spsc {
 
@@ -32,10 +36,17 @@ public:
         lock.unlock();
         not_empty_.notify_one();
     }
+    void push(T&& item) {
+        std::unique_lock<std::mutex> lock(mutex_);
+        not_full_.wait(lock, [this] {return queue_.size() < Capacity; });
+        queue_.push(std::move(item));
+        lock.unlock();
+        not_empty_.notify_one();
+    }
     void pop(T& item) {
         std::unique_lock<std::mutex> lock(mutex_);
         not_empty_.wait(lock, [this] {return !queue_.empty(); });
-        item = queue_.front();
+        item = std::move(queue_.front());
         queue_.pop();
         lock.unlock();
         not_full_.notify_one();

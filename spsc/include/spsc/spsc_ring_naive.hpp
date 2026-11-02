@@ -10,12 +10,17 @@
 // read_counter_ is updated, so the other thread never sees a half-done slot.
 //
 // "Naive": default seq_cst ordering, no padding, no cached indices.
+//
+// T must be default-constructible and copy- or move-assignable (slots are an
+// array of live objects). A try_push that returns false does not consume its
+// argument, so it can be retried.
 
 
 #pragma once
 
 #include <atomic>
 #include <cstddef>
+#include <utility>
 
 namespace spsc {
 
@@ -41,6 +46,19 @@ public:
         write_counter_.store(curr_write_counter + 1);
         return true;
     }
+    bool try_push(T&& item) {
+        std::size_t curr_write_counter = write_counter_.load();
+        std::size_t curr_read_counter = read_counter_.load();
+        // check full
+        if(curr_write_counter - curr_read_counter == Capacity) return false;
+
+        std::size_t curr_write_index = (curr_write_counter & (Capacity-1));
+        buffer_[curr_write_index] = std::move(item);
+
+        // publish: the item is now visible to the consumer
+        write_counter_.store(curr_write_counter + 1);
+        return true;
+    }
     bool try_pop(T& item) {
         std::size_t curr_write_counter = write_counter_.load();
         std::size_t curr_read_counter = read_counter_.load();
@@ -48,7 +66,7 @@ public:
         if(curr_read_counter == curr_write_counter) return false;
 
         std::size_t curr_read_index = (curr_read_counter & (Capacity-1));
-        item = buffer_[curr_read_index];
+        item = std::move(buffer_[curr_read_index]);
 
         // consume: the slot is now free for the producer
         read_counter_.store(curr_read_counter + 1);

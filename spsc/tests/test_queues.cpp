@@ -20,6 +20,7 @@
 #include <iostream>
 #include <memory>
 #include <thread>
+#include <utility>
 
 #include "spsc/mutex_queue.hpp"
 #include "spsc/spsc_ring_naive.hpp"
@@ -187,6 +188,63 @@ void stress_two_threads(int n) {
     assert(received == n);
 }
 
+
+// Counts copies and moves, to show the rvalue overload really moves.
+struct Counted {
+    static inline int copies = 0;
+    static inline int moves = 0;
+    int value = 0;
+    Counted() = default;
+    explicit Counted(int v) : value(v) {}
+    Counted(const Counted& o) : value(o.value) { ++copies; }
+    Counted(Counted&& o) noexcept : value(o.value) { ++moves; }
+    Counted& operator=(const Counted& o) { value = o.value; ++copies; return *this; }
+    Counted& operator=(Counted&& o) noexcept { value = o.value; ++moves; return *this; }
+};
+
+// Q = Queue<Counted, 4>: pushing an rvalue must not copy.
+template <typename Q>
+void test_move_counts() {
+    Q q;
+    Counted::copies = 0;
+    Counted::moves = 0;
+    bool ok = q.try_push(Counted(7));
+    assert(ok);
+    Counted out;
+    ok = q.try_pop(out);
+    assert(ok);
+    assert(out.value == 7);
+    assert(Counted::copies == 0);
+    assert(Counted::moves > 0);
+}
+
+// Q = Queue<std::unique_ptr<int>, 4>: a move-only type must work.
+template <typename Q>
+void test_move_only() {
+    Q q;
+    bool ok = q.try_push(std::make_unique<int>(7));
+    assert(ok);
+    std::unique_ptr<int> out;
+    ok = q.try_pop(out);
+    assert(ok);
+    assert(out && *out == 7);
+}
+
+// Q = Queue<std::unique_ptr<int>, 4>: a failed push must not consume its argument.
+template <typename Q>
+void test_failed_push_keeps_item() {
+    Q q;
+    bool ok;
+    for(int i = 0; i < 4; i++) {
+        ok = q.try_push(std::make_unique<int>(i));
+        assert(ok);
+    }
+    auto p = std::make_unique<int>(99);
+    ok = q.try_push(std::move(p));      // full: must fail
+    assert(!ok);
+    assert(p && *p == 99);              // and p must still own its value
+}
+
 // ---- driver: runs every generic test on one queue family ----
 // Queue is the queue template itself (e.g. spsc::SPSCRingBuffer); it is
 // instantiated here with the capacities the tests need.
@@ -205,6 +263,9 @@ void run_all(const char* name, int stress_n) {
     test_full_free_one_full_again<Q4>();
     test_alternating<Q4>();
     test_capacity_one<Q1>();
+    test_move_counts<Queue<Counted, 4>>();
+    test_move_only<Queue<std::unique_ptr<int>, 4>>();
+    test_failed_push_keeps_item<Queue<std::unique_ptr<int>, 4>>();
     stress_two_threads<Q1024>(stress_n);        // normal-size ring
     stress_two_threads<Q2>(stress_n / 2);       // tiny ring: constant full/empty
     stress_two_threads<Q1>(stress_n / 4);       // capacity 1
