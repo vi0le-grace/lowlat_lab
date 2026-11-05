@@ -2,14 +2,15 @@
 
 ## Status
 - Four try_push/try_pop queues (spin-retry mutex, naive ring, ring, cached ring)
-  plus a blocking mutex + condvar queue (push/pop).
+  plus a blocking mutex + condvar queue (push/pop), all with move overloads.
 - Tests: test_queues.cpp (generic tests shared by the four try_ queues, cached-only
-  reload tests, layout static_asserts) and test_mutex_condvar_queue.cpp.
-  TSan and ASan builds pass [confirm ASan before keeping this].
+  reload tests, move tests, layout static_asserts) and
+  test_mutex_condvar_queue.cpp. TSan and ASan builds pass.
 - Benchmarks and false-sharing demo done. Whiteboard check done.
 - CMake build done: header-only library target, tests, benchmark, ctest,
-  SPSC_SANITIZER option.
-- Next: DESIGN.md, README, GitHub Actions on x86 Linux.
+  SPSC_STRESS_N, SPSC_SANITIZER option.
+- docs/DESIGN.md written.
+- Next: README, GitHub Actions on x86 Linux, tag spsc-v1.0.
 
 ## Decisions
 - Ladder, one change per rung: mutex + condvar baseline -> naive ring (seq_cst,
@@ -24,6 +25,11 @@
 - Cache line size is a compile-time constant (spsc::CACHE_LINE_SIZE in
   constants.hpp): 128 on Apple Silicon, 64 on x86. The padded rings' layout is
   checked by static_asserts in test_queues.cpp (sizeof == 3 * line size).
+- Move overloads on all queues: a failed try_push leaves its argument intact.
+  Slots are an array of live objects, so T must be default-constructible and
+  assignable; no emplace (would need raw storage, future work).
+- Known gap: the benchmark and stress tests check only the sequence number /
+  ints, so a torn copy of a larger item would not be detected.
 
 ## Build and test (from spsc/)
     cmake -S . -B build-cmake                    # default build type: Release (-O2 -DNDEBUG)
@@ -136,10 +142,9 @@ not comparable in absolute terms to the tables above.
   Producer's load misses dropped ~157x with cached counters.
 
 ## To do
-- docs/DESIGN.md and README.md (build, test, sanitize, benchmark, results table,
-  limitations).
+- README.md (build, test, sanitize, benchmark, results table, limitations).
 - GitHub Actions on x86 Linux (build, ctest, TSan; benchmark only as a sanity check).
-- Tag spsc-v1.0 when the docs are done.
-- Optional: redo Instruments counters on the final queues (10M items each),
-  128 B payload test, move operations on all queues, batching, slot remap,
-  latency percentiles.
+- Tag spsc-v1.0 when the README is done.
+- Optional: redo Instruments counters on the final queues (20M items per run),
+  multi-word payload integrity test, latency percentiles, batching, slot remap,
+  128 B payload test, emplace with raw storage.
