@@ -1,0 +1,32 @@
+--- Ring ---
+Min:   83 ns
+p50:   166 ns
+p90:   167 ns
+p99:   209 ns
+p99.9: 542 ns
+Max:   45750 ns
+
+--- CachedRing ---
+Min:   0 ns
+p50:   83 ns
+p90:   125 ns
+p99:   125 ns
+p99.9: 292 ns
+Max:   48708 ns
+
+--- NaiveRing ---
+Min:   83 ns
+p50:   167 ns
+p90:   167 ns
+p99:   209 ns
+p99.9: 250 ns
+Max:   36750 ns
+
+--- MutexCondvar ---
+Min:   1833 ns
+p50:   2209 ns
+p90:   3458 ns
+p99:   5000 ns
+p99.9: 8250 ns
+Max:   82458 ns
+

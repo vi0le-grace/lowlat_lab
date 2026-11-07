@@ -47,6 +47,14 @@ add_executable(bench_spsc bench/bench_spsc.cpp)
 target_link_libraries(bench_spsc PRIVATE spsc Threads::Threads benchmark::benchmark)
 target_compile_options(bench_spsc PRIVATE -Wall -Wextra)
 
+add_executable(bench_latency bench/bench_latency.cpp)
+target_link_libraries(bench_latency PRIVATE spsc Threads::Threads)
+target_compile_options(bench_latency PRIVATE -Wall -Wextra)
+
+add_executable(bench_trace bench/bench_trace.cpp)
+target_link_libraries(bench_trace PRIVATE spsc Threads::Threads)
+target_compile_options(bench_trace PRIVATE -Wall -Wextra -g)
+
 if(NOT CMAKE_BUILD_TYPE STREQUAL "Release")
   message(WARNING "Benchmarks should be built with -DCMAKE_BUILD_TYPE=Release")
 endif()
