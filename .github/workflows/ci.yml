@@ -1,0 +1,60 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:        # lets you start the workflow by hand from the Actions tab
+
+jobs:
+  linux-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Google Benchmark
+        run: sudo apt-get update && sudo apt-get install -y libbenchmark-dev
+      - name: Configure
+        run: cmake -S spsc -B spsc/build
+      - name: Build
+        run: cmake --build spsc/build -j
+      - name: Test
+        run: ctest --test-dir spsc/build --output-on-failure
+
+  linux-tsan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Google Benchmark
+        run: sudo apt-get update && sudo apt-get install -y libbenchmark-dev
+      - name: Configure (ThreadSanitizer)
+        run: cmake -S spsc -B spsc/build-tsan -DSPSC_SANITIZER=thread
+      - name: Build
+        run: cmake --build spsc/build-tsan -j
+      - name: Test
+        run: ctest --test-dir spsc/build-tsan --output-on-failure
+
+  linux-bench:
+    # Manual only: shared cloud VMs are noisy, so treat these numbers as a sanity check.
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Google Benchmark
+        run: sudo apt-get update && sudo apt-get install -y libbenchmark-dev
+      - name: Configure
+        run: cmake -S spsc -B spsc/build
+      - name: Build
+        run: cmake --build spsc/build -j
+      - name: Machine info
+        run: lscpu | tee machine.txt
+      - name: Throughput benchmark
+        run: ./spsc/build/bench_spsc --benchmark_out=throughput.json --benchmark_out_format=json
+      - name: Latency benchmark
+        run: ./spsc/build/bench_latency | tee latency.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-results
+          path: |
+            machine.txt
+            throughput.json
+            latency.txt
