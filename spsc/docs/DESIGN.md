@@ -155,10 +155,15 @@ line:  write_counter_ | cached_read_counter_    producer's line
 ```
 
 **Result.** Ring to cached: 1.75x at 8 B and 2.94x at 64 B (median throughput,
-2026-10-22). In an earlier Instruments run on a prototype of the same design
-(one-slot-empty scheme, `int` payload, an older implementation), the producer's
-L1D load misses dropped about 157x with cached counters. That measurement has
-not been repeated on the final code.
+2026-10-22). Instruments on a stripped-down harness (section 12, stream mode: main
+only joins, each worker thread runs only queue operations, 50M items) shows the
+mechanism. In the plain ring the producer takes a retired L1D load miss on 0.97 of
+its pushes (reading the consumer's counter line); in the cached ring on 0.001,
+about one reload per 1,024 pushes, as designed (about 48,800 expected for 50M
+items; 50,116 observed). The producer's cycles per item fall from 59 to 26. The
+producer never waits on a full queue in any of the three runs, so it is the
+bottleneck and its per-item cost sets throughput. The consumer's retired load
+misses fall less (2.02 to 1.39 per item).
 
 ## 6. Padding and false sharing
 
@@ -187,6 +192,10 @@ code with the alignment removed; padded runs bracket the unpadded one):
   other thread is using. Caching and padding work together: caching reduces how
   often you read the other side's line, padding stops your own writes from
   disturbing it.
+- **Counter evidence (section 12):** the naive ring, whose counters share a line,
+  has far more L1D store misses than the padded ring: 2.29 vs 0.61 per ping-pong
+  round trip, and in the stream workload the producer's store misses fall from
+  1.08 (naive) to 0.14 (padded) per item.
 - **Unexplained:** at 8 B the unpadded cached ring (38.2) is slower than the
   unpadded plain ring (46.2); at 64 B it is faster (47.8 vs 29.3).
 - **Caveat:** the unpadded layout also places the counters directly after
@@ -268,7 +277,7 @@ Alternatives, none implemented:
   full from empty (the prototype scheme).
 - Round the requested capacity up to the next power of two.
 
-## 10. Benchmark method
+## 10. Throughput benchmark method
 
 1M items per iteration, one producer (main thread) and one consumer (spawned
 thread), capacity 1024, 8 B and 64 B payloads, 10 repetitions, real time,
@@ -292,20 +301,147 @@ ratios are approximate. The condvar queue at 8 B is bimodal (CV 81%); its CPU
 time is about 0.8x real time because its threads sleep, while the rings'
 threads spin (1.0x).
 
-## 11. Limits
+## 11. Latency (ping-pong round trip)
+
+`bench/bench_latency.cpp`: thread A pushes a message into queue `ping`, thread B
+echoes it through `pong`, and A measures the time until the echo arrives. Only
+one message is in flight at a time, so this measures the handoff cost and not
+queueing delay (a saturated stream would mostly measure the buffer depth).
+1M round trips after 10k warm-up, capacity 1024, `uint64_t` payload; the rings
+spin, the condvar queue uses its blocking calls. Values are round-trip times;
+one-way is roughly half. Three runs (`results/latency_run1.txt` to
+`latency_run3.txt`), ns:
+
+| | p50 | p90 | p99 | p99.9 | max |
+|---|---|---|---|---|---|
+| Ring + cached counters | 83 | 84 to 125 | 125 | 167 to 292 | 34 to 49 µs |
+| Ring | 166 | 167 | 209 | 459 to 542 | 35 to 62 µs |
+| Naive ring | 167 | 167 | 209 | 250 to 500 | 37 to 47 µs |
+| Mutex + condvar | 2,208 to 2,333 | 2,792 to 3,458 | 5,000 to 5,125 | 7,875 to 8,541 | 49 µs to 17.5 ms |
+
+- **Timer resolution.** The clock ticks about every 41.7 ns, so every value is a
+  multiple of that, and differences under about 42 ns mean nothing. The minimum
+  is not reported: the cached ring's minimum of 0 ns means the round trip fell
+  inside one tick or a clock read was reordered. The maximum is dominated by
+  scheduler preemption (the condvar queue's 17.5 ms in the first run was 82 and
+  49 µs in the other two).
+- **Cached counters roughly halve the round trip:** 83 vs 166 ns at p50 (2 vs 4
+  ticks, so "about 80 vs 170 ns"), about 1.7x at p99, and 1.8x to 3x at p99.9
+  (the p99.9 ranges of the cached and naive rings overlap in one run).
+- **Naive and plain ring are indistinguishable** here, although naive was slower
+  in throughput. The two benchmarks stress different things (two threads running
+  flat out versus one message in flight).
+- **The condvar queue is 13x to 14x slower than the ring and 27x to 28x slower
+  than the cached ring at p50** (24x and 40x at p99). A sleeping thread has to be
+  woken through the kernel.
+- **Mechanism:** see section 12. It is a hypothesis, not a proven cause.
+- Threads are not pinned, so run-to-run spread is real; report ranges.
+- **Not measured:** latency under load (a paced producer) and CPU cost.
+
+## 12. Hardware counters (Instruments)
+
+**Method.** `bench/bench_trace.cpp` exists only to be profiled. `main` creates two
+worker threads and joins them; each worker runs only queue operations and its
+spin loop, in a named, non-inlined function, so Instruments (CPU Counters, manual
+events) shows one row per thread, identified by function name. Two workloads:
+ping-pong (10M round trips, the same workload as the latency benchmark without any
+timing or recording) and stream (50M items, one producer and one consumer on a
+saturated queue). Events: cycles, instructions, retired L1D load misses
+(`L1D_CACHE_MISS_LD_NONSPEC`), all L1D load misses (`L1D_CACHE_MISS_LD`, which I
+believe also counts speculative loads and is several times higher), L1D store
+misses and retired branch mispredicts. Totals are divided by n. The counts are not
+cache-line transfers, and the harness does less work per item than the
+Google Benchmark one, so cycle ratios here are larger than the throughput ratios
+(1.96x naive to ring and 2.3x ring to cached, against 1.34x and 1.75x at 8 B).
+Use these numbers for mechanism, not as speedup claims.
+
+### Ping-pong (per round trip)
+
+Both threads together, except cycles (per thread):
+
+| | cycles | store misses | retired load misses | all load misses |
+|---|---|---|---|---|
+| Ring | 502 | 0.61 | 5.89 | 68.2 |
+| Naive ring | 513 | 2.29 | 9.82 | 68.2 |
+| Cached ring | 262 | 0.06 | 6.13 | 65.3 |
+
+Per thread (initiator / echo): retired load misses ring 2.95 / 2.95, naive
+5.26 / 4.56, cached 4.09 / 2.04; store misses ring 0.23 / 0.37, naive 1.08 / 1.21,
+cached 0.04 / 0.02.
+
+- Cycles per round trip halve with cached counters (502 to 262 per thread),
+  matching the 2x latency ratio.
+- **Store misses are the signal:** about 10x fewer in the cached ring than in the
+  ring (0.06 vs 0.61), and about 3.8x more in the naive ring than in the ring.
+  Both threads' store misses drop in the cached ring.
+- **Load misses do not separate ring from cached** (retired 5.9 vs 6.1, all loads
+  68.2 vs 65.3), so fewer load misses is not why the round trip is shorter.
+- **Hypothesis (formed after seeing the data, not tested):** in the plain ring each
+  push reads the line the other side's counter lives on, so the other side's
+  store to that counter has to take the line back; in the cached ring the producer
+  almost never reads it, so those stores hit in cache. How that turns into
+  latency is a guess (a release store is ordered after earlier stores, so an
+  ownership miss on the counter store could delay the next publish).
+- The naive ring has more load and store misses than the ring at the same
+  latency, so miss counts alone do not predict latency.
+- Branch mispredicts are about 0.98 per thread per round trip in every run (one
+  spin-loop exit), which checks the per-round-trip normalization.
+
+### Stream (per item, per thread)
+
+| | thread | cycles | instructions | retired load misses | store misses | branch mispredicts |
+|---|---|---|---|---|---|---|
+| Naive | producer | 115.1 | 14.1 | 0.048 | 1.08 | about 0 |
+| Naive | consumer | 115.4 | 72.8 | 2.94 | 0.39 | 0.67 |
+| Ring | producer | 58.8 | 13.0 | 0.97 | 0.14 | about 0 |
+| Ring | consumer | 58.8 | 46.9 | 2.02 | 0.005 | 0.47 |
+| Cached | producer | 25.6 | 10.8 | 0.001 | 0.14 | about 0 |
+| Cached | consumer | 25.5 | 40.8 | 1.39 | 0.0005 | 0.10 |
+
+- **The producer's load misses nearly vanish with cached counters:** 0.97 per item
+  in the ring (so about 97% of pushes miss on the consumer's counter line) against
+  0.001 in the cached ring, about 970x fewer. That is one reload per 1,024 pushes,
+  as designed.
+- **The producer is the bottleneck in all three runs (inference).** Its branch
+  mispredicts are about zero, so it never waits on a full queue, and both threads
+  run for the whole duration, so cycles per item are equal for the two threads
+  (115, 59, 26). Throughput is therefore set by the producer's cost per item.
+- **Each rung of the ladder shows up in a different counter:** naive to ring
+  (padding) cuts the producer's store misses 7.7x (1.08 to 0.14); ring to cached
+  cuts its load misses about 970x and its cycles per item 2.3x.
+- The consumer's retired load misses fall less (2.94, 2.02, 1.39); its store
+  misses are small in all three padded or cached runs.
+
+### Not explained
+
+- The naive producer has almost no retired load misses (0.05 per item) but 1.08
+  store misses per item.
+- In ping-pong, by the same logic each thread's push should save one load miss
+  per round trip. The echo thread shows exactly that (2.95 to 2.04); the
+  initiator shows one more (2.95 to 4.09), so the total looks flat.
+- An earlier profile of `bench_latency`, where timing and recording ran inside the
+  measured threads, showed 30.8 (ring) vs 9.0 (cached) retired load misses per
+  round trip. That did not reproduce in `bench_trace` and is not explained, so it
+  is not used here.
+- Counter values are not cache-line transfers (about 3 retired misses per
+  ping-pong round trip per thread in the ring, and tens of all-load misses).
+
+## 13. Limits
 
 - **Single producer, single consumer.** Multiple producers or consumers need a
   different design (for example per-slot sequence numbers).
 - **Spinning:** the ring queues are designed to be polled. A waiting thread
   burns a core. The condvar baseline is cheaper when idle.
-- **Throughput is measured; latency is not.** Under a saturated stream the rings
-  win, but the p50/p99 per-message latency, which matters most for trading, and
-  CPU cost are not measured.
+- **Latency is measured only as a ping-pong round trip** with one message in flight
+  and about 42 ns timer resolution. Latency under load and CPU cost are not measured.
+- **Hardware-counter evidence is correlational.** The counts are not cache-line
+  transfers and several observations are unexplained (section 12).
 - **Bounded size and no shutdown mechanism.**
 - **One machine, Apple Silicon, unpinned threads.** x86 has not been measured.
   Only numbers measured on this machine are claimed.
 - **Requirements on `T`** (section 8), and the testing limits (section 7).
 
-Possible next steps: a latency benchmark with percentiles, batched publish
-(several items per store), slot remapping, `emplace` with raw storage, and an
-x86 CI run as a cross-check.
+Possible next steps: a latency test with a paced producer, a producer-only-caching
+variant of the ring to isolate the mechanism, a multi-word payload integrity test,
+batched publish (several items per store), slot remapping, `emplace` with raw
+storage, and an x86 CI run as a cross-check.
