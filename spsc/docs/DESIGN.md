@@ -445,3 +445,23 @@ Possible next steps: a latency test with a paced producer, a producer-only-cachi
 variant of the ring to isolate the mechanism, a multi-word payload integrity test,
 batched publish (several items per store), slot remapping, `emplace` with raw
 storage, and an x86 CI run as a cross-check.
+
+## 14. x86 Linux cross-check (shared cloud VM)
+
+GitHub Actions runner, AMD EPYC 9V74, 2 vCPUs (reported as 1 core, 2 threads), one
+run, Google Benchmark library from apt (debug build), `-O2`. A shared virtual
+machine: a sanity check, not a result.
+
+| Queue | throughput 8 B / 64 B (M items/s) | latency p50 / p99 / p99.9 (ns) |
+|---|---|---|
+| Mutex + condvar | 8.1 / 7.0 | 15,844 / 24,095 / 32,668 |
+| Naive ring | 26.2 / 26.1 | 130 / 160 / 171 |
+| Ring | 97.1 / 87.7 | 130 / 151 / 161 |
+| Ring + cached | 135.9 / 105.2 | 120 / 140 / 151 |
+
+- The ordering of the queues is the same as on Apple Silicon.
+- Naive to ring is 3.7x here against 1.34x on the Mac, as the Arm vs x86 note
+  predicted (not checked in the generated code).
+- The cached ring's latency gain shrinks to about 8% (120 vs 130 ns). The vCPUs may
+  be hyperthreads of one core, so cross-core transfers are cheap.
+- Tails are tighter at p99.9 than on the Mac, but the maximum is 1 to 5 ms.
